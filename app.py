@@ -216,8 +216,11 @@ def profile_sidebar():
         index=0,
     )
 
+    # Fix: renamed from "Include Mixed playlist in views". This only hides the
+    # Mixed *tab*; stats deliberately stay library-wide, and the old wording
+    # implied it filtered the stats too.
     profile["include_mixed"] = st.sidebar.checkbox(
-        "Include Mixed playlist in views",
+        "Show Mixed playlist tab",
         value=bool(profile.get("include_mixed", True)),
     )
 
@@ -321,18 +324,27 @@ def lucky_section(playlists):
 
 def stats_section(playlists):
     """Render statistics based on the playlists."""
-    st.header("Playlist stats")
+    st.header("Library stats")
 
     stats = compute_playlist_stats(playlists)
 
+    # Fix: stats always describe the whole library, even when the Mixed tab is
+    # hidden. Hiding the tab used to leave the ratio looking wrong, because the
+    # denominator still counted Mixed songs that were no longer on screen. The
+    # labels now say which set each number covers.
+    st.caption(
+        f"Across the full library of {stats['total_songs']} songs, including "
+        "Mixed songs when their tab is hidden."
+    )
+
     col1, col2, col3 = st.columns(3)
-    col1.metric("Total songs", stats["total_songs"])
+    col1.metric("Songs in library", stats["total_songs"])
     col2.metric("Hype songs", stats["hype_count"])
     col3.metric("Chill songs", stats["chill_count"])
 
     col4, col5, col6 = st.columns(3)
     col4.metric("Mixed songs", stats["mixed_count"])
-    col5.metric("Hype ratio", f"{stats['hype_ratio']:.2f}")
+    col5.metric("Hype share of library", f"{stats['hype_ratio']:.0%}")
     col6.metric("Average energy", f"{stats['avg_energy']:.2f}")
 
     top_artist = stats["top_artist"]

@@ -70,13 +70,24 @@ def classify_song(song: Song, profile: Dict[str, object]) -> str:
     hype_keywords = ["rock", "punk", "party"]
     chill_keywords = ["lofi", "ambient", "sleep"]
 
-    is_hype_keyword = any(k in genre for k in hype_keywords)
-    is_chill_keyword = any(k in title for k in chill_keywords)
+    # Search both lists in the genre and the title. Lowercased and with hyphens
+    # removed so "Lo-fi Rain" matches the keyword "lofi".
+    text = f"{genre} {title}".lower().replace("-", "")
+    is_hype_keyword = any(k in text for k in hype_keywords)
+    is_chill_keyword = any(k in text for k in chill_keywords)
 
-    if genre == favorite_genre or energy >= hype_min_energy or is_hype_keyword:
+    # Fix: apply the explicit energy thresholds first so the profile sliders
+    # are authoritative, then fall back to genre/keyword hints for songs in
+    # between. Previously `genre == favorite_genre` short-circuited ahead of
+    # everything, labelling even a 1-energy rock ballad as Hype.
+    if energy >= hype_min_energy:
         return "Hype"
-    if energy <= chill_max_energy or is_chill_keyword:
+    if energy <= chill_max_energy:
         return "Chill"
+    if is_chill_keyword:
+        return "Chill"
+    if is_hype_keyword or genre == favorite_genre:
+        return "Hype"
     return "Mixed"
 
 
@@ -101,7 +112,10 @@ def merge_playlists(a: PlaylistMap, b: PlaylistMap) -> PlaylistMap:
     """Merge two playlist maps into a new map."""
     merged: PlaylistMap = {}
     for key in set(list(a.keys()) + list(b.keys())):
-        merged[key] = a.get(key, [])
+        # Fix: copy the list out of `a` instead of aliasing it. extend() was
+        # mutating the caller's own playlists in place, so every rerun of the
+        # app grew the original lists.
+        merged[key] = list(a.get(key, []))
         merged[key].extend(b.get(key, []))
     return merged
 
@@ -116,12 +130,16 @@ def compute_playlist_stats(playlists: PlaylistMap) -> Dict[str, object]:
     chill = playlists.get("Chill", [])
     mixed = playlists.get("Mixed", [])
 
-    total = len(hype)
+    # Fix: divide by the total number of songs. The denominator was len(hype),
+    # which made the ratio always 1.0.
+    total = len(all_songs)
     hype_ratio = len(hype) / total if total > 0 else 0.0
 
     avg_energy = 0.0
     if all_songs:
-        total_energy = sum(song.get("energy", 0) for song in hype)
+        # Fix: average over every song, not just the Hype ones, so the
+        # numerator and denominator cover the same set of songs.
+        total_energy = sum(song.get("energy", 0) for song in all_songs)
         avg_energy = total_energy / len(all_songs)
 
     top_artist, top_count = most_common_artist(all_songs)
@@ -168,7 +186,10 @@ def search_songs(
 
     for song in songs:
         value = str(song.get(field, "")).lower()
-        if value and value in q:
+        # Fix: check whether the query appears inside the field value. The
+        # comparison was reversed, so "Calm" matched nothing and only typing
+        # the artist's full name worked.
+        if value and q in value:
             filtered.append(song)
 
     return filtered
@@ -184,7 +205,11 @@ def lucky_pick(
     elif mode == "chill":
         songs = playlists.get("Chill", [])
     else:
-        songs = playlists.get("Hype", []) + playlists.get("Chill", [])
+        # Fix: "any" should draw from every playlist. It previously combined
+        # only Hype and Chill, so Mixed songs could never be picked.
+        songs = []
+        for mood_songs in playlists.values():
+            songs.extend(mood_songs)
 
     return random_choice_or_none(songs)
 
@@ -192,6 +217,11 @@ def lucky_pick(
 def random_choice_or_none(songs: List[Song]) -> Optional[Song]:
     """Return a random song or None."""
     import random
+
+    # Fix: random.choice() raises IndexError on an empty list. Return None so
+    # callers can show the "no songs available" message instead of crashing.
+    if not songs:
+        return None
 
     return random.choice(songs)
 
